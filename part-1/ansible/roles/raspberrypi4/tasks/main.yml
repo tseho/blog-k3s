@@ -1,0 +1,16 @@
+---
+- name: Update APT cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 86400
+  timeout: 120
+
+- name: Upgrade all packages
+  ansible.builtin.apt:
+    upgrade: safe
+  timeout: 300
+
+- name: Purge APT dependencies
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true

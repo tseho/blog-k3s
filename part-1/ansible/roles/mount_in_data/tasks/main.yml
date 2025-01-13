@@ -1,0 +1,81 @@
+---
+- name: Prepare variables
+  ansible.builtin.set_fact:
+    mount_in_data_src_path: "{{ path | regex_replace('\\/$', '') }}"
+    mount_in_data_dest_path: "/data{{ path | regex_replace('\\/$', '') }}"
+
+- name: Get stat of {{ mount_in_data_src_path }}
+  ansible.builtin.stat:
+    path: "{{ mount_in_data_src_path }}"
+  register: src
+
+- name: Get stat of {{ mount_in_data_dest_path }}
+  ansible.builtin.stat:
+    path: "{{ mount_in_data_dest_path }}"
+  register: dest
+
+- ansible.builtin.assert:
+    that: 
+      - src.stat.exists
+
+- name: Create {{ mount_in_data_dest_path | dirname }}
+  ansible.builtin.file:
+    path: "{{ mount_in_data_dest_path | dirname }}"
+    state: directory
+    recurse: true
+  when: not dest.stat.exists
+
+- name: Copy directory
+  when: dest.stat.exists == false and src.stat.exists == true and src.stat.islnk == false and src.stat.isdir|default(false) == true
+  block:
+    - name: Create {{ mount_in_data_dest_path }}
+      ansible.builtin.file:
+        path: "{{ mount_in_data_dest_path }}"
+        state: directory
+        owner: "{{ src.stat.uid }}"
+        group: "{{ src.stat.gid }}"
+        mode: "{{ src.stat.mode }}"
+        recurse: true
+
+    - name: Copy files from {{ mount_in_data_src_path }} to {{ mount_in_data_dest_path }}
+      ansible.builtin.copy:
+        src: "{{ mount_in_data_src_path }}/"
+        dest: "{{ mount_in_data_dest_path }}"
+        owner: "{{ src.stat.uid }}"
+        group: "{{ src.stat.gid }}"
+        remote_src: true
+      when: backup|default(true)
+      register: result
+      until: result is not failed
+      retries: 10
+      delay: 1
+
+- name: Replace original source by symlink
+  when: src.stat.islnk == false
+  block:
+    - name: Find mount points under {{ mount_in_data_src_path }}
+      ansible.builtin.shell: mount -l | grep {{ mount_in_data_src_path }} | awk '{print $3}'
+      register: submounts
+      changed_when: false
+
+    - name: Remove mount points from {{ mount_in_data_src_path }}
+      ansible.posix.mount:
+        path: "{{ item }}"
+        state: unmounted
+      loop: "{{ submounts.stdout_lines }}"
+
+    - name: Remove {{ mount_in_data_src_path }}
+      ansible.builtin.file:
+        path: "{{ mount_in_data_src_path }}"
+        state: absent
+      register: result
+      until: result is not failed
+      retries: 10
+      delay: 1
+
+    - name: Create symlink from {{ mount_in_data_src_path }} to {{ mount_in_data_dest_path }}
+      ansible.builtin.file:
+        src: "{{ mount_in_data_dest_path }}"
+        dest: "{{ mount_in_data_src_path }}"
+        state: link
+        force: true

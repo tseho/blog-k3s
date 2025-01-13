@@ -1,0 +1,231 @@
+---
+- name: Update clock
+  ansible.builtin.command:
+    cmd: hwclock --hctosys
+  failed_when: false
+  changed_when: false
+
+- name: Create /var/srun
+  ansible.builtin.file:
+    path: "/var/srun"
+    state: directory
+
+- name: Disable mandb auto update
+  ansible.builtin.file:
+    path: "/var/lib/man-db/auto-update"
+    state: absent
+
+- name: Disable daily software updates
+  ansible.builtin.systemd_service:
+    name: "apt-daily-upgrade"
+    masked: true
+    enabled: false
+
+- name: Disable daily software updates
+  ansible.builtin.systemd_service:
+    name: "apt-daily"
+    masked: true
+    enabled: false
+
+- name: Remove avahi (.local domain)
+  ansible.builtin.apt:
+    name: avahi-daemon
+    state: absent
+    purge: true
+
+- name: Disable 3G modem
+  ansible.builtin.apt:
+    name: modemmanager
+    state: absent
+    purge: true
+
+- name: Disable bluetooth
+  ansible.builtin.systemd_service:
+    name: "bluetooth"
+    enabled: false
+  ignore_errors: true
+
+- name: Disable bluetooth
+  ansible.builtin.systemd_service:
+    name: "hciuart"
+    enabled: false
+  ignore_errors: true
+
+- name: Disable bluetooth
+  ansible.builtin.lineinfile:
+    path: /boot/firmware/config.txt
+    line: dtoverlay=disable-bt
+
+- name: Disable bluetooth
+  ansible.builtin.apt:
+    name: bluez
+    state: absent
+
+- name: Disable wifi
+  ansible.builtin.systemd_service:
+    name: "wpa_supplicant"
+    enabled: false
+
+- name: Disable fsck
+  ansible.builtin.lineinfile:
+    path: /boot/firmware/cmdline.txt
+    backrefs: true
+    regexp: "^(((?!fsck.mode).)*)$"
+    line: '\1 fsck.mode=skip'
+
+- name: Disable SWAP at boot
+  ansible.builtin.lineinfile:
+    path: /boot/firmware/cmdline.txt
+    backrefs: true
+    regexp: "^(((?!noswap).)*)$"
+    line: '\1 noswap'
+
+- name: Disable SWAP service
+  ansible.builtin.systemd_service:
+    name: "dphys-swapfile.service"
+    enabled: false
+
+- name: Override fake-hwclock to mount on save
+  ansible.builtin.copy:
+    dest: /etc/cron.hourly/fake-hwclock
+    content: |
+      #!/bin/sh
+      #
+      # Simple cron script - save the current clock periodically in case of
+      # a power failure or other crash
+
+      if (command -v fake-hwclock >/dev/null 2>&1) ; then
+        mount -o remount,rw /
+        fake-hwclock save
+        mount -o remount,ro /
+      fi
+
+- name: Mount files in tmpfs
+  ansible.builtin.include_role:
+    name: mount_in_tmpfs
+  vars:
+    path: "{{ item.path }}"
+    backup: "{{ item.backup|default(true) }}"
+    systemd_service_id: "{{ item.id }}"
+    systemd_restore_before: "{{ item.before }}"
+  with_items:
+    - path: /etc/resolv.conf
+      id: etc_resolve
+      before: systemd-resolved.service
+    - path: /var/lib/dhcp
+      id: dhcp
+      before: NetworkManager.service
+    - path: /var/lib/NetworkManager
+      id: network_manager
+      before: NetworkManager.service
+    - path: /var/lib/nfs
+      id: nfs
+      before: NetworkManager.service
+
+- name: Disable man db
+  ansible.builtin.systemd_service:
+    name: "man-db.timer"
+    masked: true
+
+- name: Disable apt daily
+  ansible.builtin.systemd_service:
+    name: "apt-daily.timer"
+    masked: true
+
+- name: Disable apt daily upgrade
+  ansible.builtin.systemd_service:
+    name: "apt-daily-upgrade.timer"
+    masked: true
+
+- name: Configure max size of /run/user/$UID
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/logind.conf
+    line: RuntimeDirectorySize={{ raspberrypi_tmpfs_max_size|default('10%') }}
+    regexp: '^RuntimeDirectorySize='
+    insertafter: '^#RuntimeDirectorySize='
+  notify: reboot
+
+- name: Configure max size of /run
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: tmpfs /run tmpfs defaults,noatime,nosuid,nodev,size={{ raspberrypi_tmpfs_max_size|default('10%') }} 0 0
+    regexp: '^tmpfs /run '
+  notify: reboot
+
+- name: Mount /tmp with tmpfs
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: tmpfs /tmp tmpfs defaults,noatime,nosuid,nodev 0 0
+    regexp: '^tmpfs /tmp '
+  notify: reboot
+
+- name: Mount /var/tmp with tmpfs
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: tmpfs /var/tmp tmpfs defaults,noatime,nosuid,nodev 0 0
+    regexp: '^tmpfs /var/tmp '
+  notify: reboot
+
+- name: Mount /var/log with tmpfs
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: tmpfs /var/log tmpfs defaults,noatime,nosuid,nodev,noexec,size=100m 0 0
+    regexp: '^tmpfs /var/log '
+  notify: reboot
+
+- name: Mount /var/lib/logrotate with tmpfs
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: tmpfs /var/lib/logrotate tmpfs defaults,noatime,nosuid,nodev,noexec,size=1m,mode=0755 0 0
+    regexp: '^tmpfs /var/lib/logrotate '
+  notify: reboot
+
+- name: Mount /var/lib/sudo with tmpfs
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: tmpfs /var/lib/sudo tmpfs defaults,noatime,nosuid,nodev,noexec,size=1m,mode=0700 0 0
+    regexp: '^tmpfs /var/lib/sudo '
+  notify: reboot
+
+- name: Mount /var/lib/systemd/timesync with tmpfs
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: tmpfs /var/lib/systemd/timesync tmpfs defaults,noatime,nosuid,nodev,noexec,size=1m,mode=0744 0 0
+    regexp: '^tmpfs /var/lib/systemd/timesync '
+  notify: reboot
+
+- name: Mount /home/pi/.ansible with tmpfs
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: tmpfs /home/pi/.ansible tmpfs defaults,noatime,nosuid,nodev 0 0
+    regexp: '^tmpfs /home/pi/.ansible '
+  notify: reboot
+
+- name: Limit logs size
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/journald.conf
+    line: SystemMaxUse=49M
+    insertafter: '^#SystemMaxUse='
+    regexp: '^SystemMaxUse='
+
+- name: Mark /boot/firmware as readonly in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\S+\s+)(\/boot\/firmware)(\s+)((?:ext4|xfs|vfat)\s+)(?!(?:\S*,)?ro(?:,\S*)?\s+)(\S+)(\s+.+)$'
+    replace: '\1\2 \4 \5,ro \6'
+
+- name: Mark / as readonly in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\S+\s+)(\/)(\s+)((?:ext4|xfs|vfat)\s+)(?!(?:\S*,)?ro(?:,\S*)?\s+)(\S+)(\s+.+)$'
+    replace: '\1\2 \4 \5,ro \6'
+
+- name: Create /etc/readonly.bashrc
+  ansible.builtin.copy:
+    src: readonly.bashrc
+    dest: /etc/readonly.bashrc
+
+- name: Import /etc/readonly.bashrc
+  ansible.builtin.lineinfile:
+    path: /etc/bash.bashrc
+    line: '. /etc/readonly.bashrc'

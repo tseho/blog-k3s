@@ -1,0 +1,17 @@
+---
+- name: Configure Raspberry PIs for kubernetes control pane
+  hosts: k8s_control
+  gather_facts: true
+  pre_tasks:
+    - ansible.builtin.include_role:
+        name: raspberrypi4_read_only
+        tasks_from: pre_tasks
+  post_tasks:
+    - ansible.builtin.include_role:
+        name: raspberrypi4_read_only
+        tasks_from: post_tasks
+  roles:
+    - { role: raspberrypi4 }
+    - { role: raspberrypi4_read_only }
+    - { role: raspberrypi4_k3s_server }
+    - { role: raspberrypi4_k3s_flux }

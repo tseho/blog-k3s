@@ -1,0 +1,30 @@
+---
+kubernetes:
+  children:
+    k8s_control:
+      hosts:
+        k8s_control_1:
+          ansible_host: 192.168.2.20
+          ansible_user: pi
+          ansible_become: true
+          ansible_ssh_extra_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+          raspberrypi_readonly: true
+          raspberrypi_tmpfs_max_size: 75%
+  vars:
+    k3s_version: v1.30.2+k3s1
+    k3s_token: <CHANGE_ME>
+    k3s_api_endpoint: "{{ hostvars[groups['k8s_control'][0]]['ansible_host'] }}"
+    k3s_api_port: 6443
+    k3s_server_group: k8s_control
+    k3s_agent_group: k8s_agent
+    k3s_extra_server_args: |
+      --kubelet-arg container-log-max-files=2
+      --kubelet-arg container-log-max-size=5Mi
+    k3s_extra_agent_args: |
+      --kubelet-arg container-log-max-files=2
+      --kubelet-arg container-log-max-size=5Mi
+    flux_version: 2.4.0
+    flux_github_username: <CHANGE_ME>
+    flux_github_repository: <CHANGE_ME>
+    flux_github_token: <CHANGE_ME>
+    flux_cluster_name: production

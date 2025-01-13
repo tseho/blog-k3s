@@ -1,0 +1,2 @@
+---
+systemd_restore_before: systemd-resolved.service

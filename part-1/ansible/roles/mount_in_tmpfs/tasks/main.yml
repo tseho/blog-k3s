@@ -1,0 +1,170 @@
+---
+- name: Prepare variables
+  ansible.builtin.set_fact:
+    mount_in_tmpfs_src_ends_with_slash: "{{ path is regex('\\/$') }}"
+    mount_in_tmpfs_src_path: "{{ path | regex_replace('\\/$', '') }}"
+    mount_in_tmpfs_dest_path: "/var/run{{ path | regex_replace('\\/$', '') }}"
+    mount_in_tmpfs_backup_path: "/etc/rpi-ro{{ path | regex_replace('\\/$', '') }}"
+
+- name: Get stat of {{ mount_in_tmpfs_src_path }}
+  ansible.builtin.stat:
+    path: "{{ mount_in_tmpfs_src_path }}"
+  register: src
+
+- name: Get stat of {{ mount_in_tmpfs_dest_path }}
+  ansible.builtin.stat:
+    path: "{{ mount_in_tmpfs_dest_path }}"
+  register: dest
+
+- name: Check if directory
+  ansible.builtin.set_fact:
+    mount_in_tmpfs_is_dir: "{{ src.stat.isdir|default(false) or dest.stat.isdir|default(false) or mount_in_tmpfs_src_ends_with_slash }}"
+
+- ansible.builtin.debug:
+    var: mount_in_tmpfs_is_dir
+
+- ansible.builtin.debug:
+    var: dest.stat
+
+- ansible.builtin.debug:
+    var: src.stat
+
+- ansible.builtin.assert:
+    that: 
+      - src.stat.exists
+
+- name: Get stat of {{ mount_in_tmpfs_dest_path | dirname }}
+  ansible.builtin.stat:
+    path: "{{ mount_in_tmpfs_dest_path | dirname }}"
+  register: parent
+
+- name: Create {{ mount_in_tmpfs_dest_path | dirname }}
+  ansible.builtin.file:
+    path: "{{ mount_in_tmpfs_dest_path | dirname }}"
+    state: directory
+    recurse: true
+  when: parent.stat.exists == false
+
+- name: Create {{ mount_in_tmpfs_backup_path | dirname }}
+  ansible.builtin.file:
+    path: "{{ mount_in_tmpfs_backup_path | dirname }}"
+    state: directory
+    recurse: true
+
+- name: Copy file
+  when: dest.stat.exists == false and src.stat.exists == true and src.stat.islnk == false and src.stat.isdir|default(false) == false
+  block:
+    - name: Copy {{ mount_in_tmpfs_src_path }} to {{ mount_in_tmpfs_dest_path }}
+      ansible.builtin.copy:
+        src: "{{ mount_in_tmpfs_src_path }}"
+        dest: "{{ mount_in_tmpfs_dest_path }}"
+        remote_src: true
+
+    - name: Copy {{ mount_in_tmpfs_src_path }} to {{ mount_in_tmpfs_backup_path }}
+      ansible.builtin.copy:
+        src: "{{ mount_in_tmpfs_src_path }}"
+        dest: "{{ mount_in_tmpfs_backup_path }}"
+        remote_src: true
+
+- name: Copy directory
+  when: dest.stat.exists == false and src.stat.exists == true and src.stat.islnk == false and src.stat.isdir|default(false) == true
+  block:
+    - name: Create {{ mount_in_tmpfs_dest_path }}
+      ansible.builtin.file:
+        path: "{{ mount_in_tmpfs_dest_path }}"
+        state: directory
+        owner: "{{ src.stat.uid }}"
+        group: "{{ src.stat.gid }}"
+        mode: "{{ src.stat.mode }}"
+        recurse: true
+
+    - name: Copy files from {{ mount_in_tmpfs_src_path }} to {{ mount_in_tmpfs_dest_path }}
+      ansible.builtin.copy:
+        src: "{{ mount_in_tmpfs_src_path }}/"
+        dest: "{{ mount_in_tmpfs_dest_path }}"
+        owner: "{{ src.stat.uid }}"
+        group: "{{ src.stat.gid }}"
+        remote_src: true
+      when: backup|default(true)
+      register: result
+      until: result is not failed
+      retries: 10
+      delay: 1
+
+    - name: Create {{ mount_in_tmpfs_backup_path }}
+      ansible.builtin.file:
+        path: "{{ mount_in_tmpfs_backup_path }}"
+        state: directory
+        owner: "{{ src.stat.uid }}"
+        group: "{{ src.stat.gid }}"
+        mode: "{{ src.stat.mode }}"
+        recurse: true
+      when: backup|default(true)
+
+    - name: Copy files from {{ mount_in_tmpfs_src_path }} to {{ mount_in_tmpfs_backup_path }}
+      ansible.builtin.copy:
+        src: "{{ mount_in_tmpfs_src_path }}/"
+        dest: "{{ mount_in_tmpfs_backup_path }}"
+        owner: "{{ src.stat.uid }}"
+        group: "{{ src.stat.gid }}"
+        remote_src: true
+      when: backup|default(true)
+      register: result
+      until: result is not failed
+      retries: 10
+      delay: 1
+
+- name: Setup restoration on boot for {{ mount_in_tmpfs_src_path }}
+  ansible.builtin.template:
+    src: restore.j2
+    dest: "/etc/systemd/system/restore_{{ systemd_service_id }}.service"
+
+- name: Enable auto restoration for {{ mount_in_tmpfs_src_path }}
+  ansible.builtin.systemd_service:
+    name: "restore_{{ systemd_service_id }}.service"
+    enabled: true
+
+- name: Setup backup
+  when: backup|default(true)
+  block:
+    - name: Setup auto backup on shutdown for {{ mount_in_tmpfs_src_path }}
+      ansible.builtin.template:
+        src: backup_on_shutdown.j2
+        dest: "/etc/systemd/system/backup_on_shutdown_{{ systemd_service_id }}.service"
+
+    - name: Enable auto backup on shutdown for {{ mount_in_tmpfs_src_path }}
+      ansible.builtin.systemd_service:
+        name: "backup_on_shutdown_{{ systemd_service_id }}.service"
+        enabled: true
+
+- name: Replace original source by symlink
+  when: src.stat.islnk == false
+  block:
+    - name: Find mount points under {{ mount_in_tmpfs_src_path }}
+      ansible.builtin.shell: mount -l | grep {{ mount_in_tmpfs_src_path }} | awk '{print $3}'
+      register: submounts
+      changed_when: false
+      when: mount_in_tmpfs_is_dir
+
+    - name: Remove mount points from {{ mount_in_tmpfs_src_path }}
+      ansible.posix.mount:
+        path: "{{ item }}"
+        state: unmounted
+      loop: "{{ submounts.stdout_lines }}"
+      when: mount_in_tmpfs_is_dir
+
+    - name: Remove {{ mount_in_tmpfs_src_path }}
+      ansible.builtin.file:
+        path: "{{ mount_in_tmpfs_src_path }}"
+        state: absent
+      register: result
+      until: result is not failed
+      retries: 10
+      delay: 1
+
+    - name: Create symlink from {{ mount_in_tmpfs_src_path }} to {{ mount_in_tmpfs_dest_path }}
+      ansible.builtin.file:
+        src: "{{ mount_in_tmpfs_dest_path }}"
+        dest: "{{ mount_in_tmpfs_src_path }}"
+        state: link
+        force: true

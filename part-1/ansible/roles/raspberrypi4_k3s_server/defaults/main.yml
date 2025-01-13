@@ -1,0 +1,5 @@
+---
+raspberrypi4_k3s_server_kubeconfig: ~/.kube/config.new
+raspberrypi4_k3s_server_user_kubectl: true
+raspberrypi4_k3s_server_cluster_context: k3s-ansible
+raspberrypi4_k3s_server_use_external_database: false

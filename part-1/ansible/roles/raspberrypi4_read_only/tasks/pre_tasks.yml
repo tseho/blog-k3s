@@ -1,0 +1,10 @@
+---
+- name: Make root partition writeable
+  ansible.builtin.command:
+    cmd: mount -o remount,rw /
+  changed_when: false
+
+- name: Make boot partition writeable
+  ansible.builtin.command:
+    cmd: mount -o remount,rw /boot/firmware
+  changed_when: false

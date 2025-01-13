@@ -1,0 +1,30 @@
+---
+- name: Downloading and extracting flux
+  ansible.builtin.unarchive:
+    src: "https://github.com/fluxcd/flux2/releases/download/v{{ flux_version }}/flux_{{ flux_version }}_linux_arm64.tar.gz"
+    dest: "/usr/local/bin"
+    extra_opts:
+      - flux
+    remote_src: true
+    owner: "root"
+    group: "root"
+    mode: "0755"
+
+- name: Bootstrap flux
+  ansible.builtin.shell: |
+    flux bootstrap github \
+      --token-auth \
+      --owner={{ flux_github_username }} \
+      --repository={{ flux_github_repository }} \
+      --branch=master \
+      --path=clusters/{{ flux_cluster_name }} \
+      --reconcile=false \
+      --personal
+  environment:
+    GITHUB_TOKEN: "{{ flux_github_token }}"
+    KUBECONFIG: "/etc/rancher/k3s/k3s.yaml"
+  retries: 3
+  delay: 10
+  timeout: 300
+  register: result
+  changed_when: "'sync manifests are up to date' not in result.stderr"

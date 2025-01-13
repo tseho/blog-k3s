@@ -1,0 +1,13 @@
+[Unit]
+Description=Restore {{ mount_in_tmpfs_src_path }} on boot
+Before={{ systemd_restore_before }}
+
+[Service]
+{% if mount_in_tmpfs_is_dir %}
+ExecStart=/bin/sh -c "mkdir -p {{ mount_in_tmpfs_dest_path }}; cp -r {{ mount_in_tmpfs_backup_path }}/. {{ mount_in_tmpfs_dest_path }}; chown -R {{ src.stat.uid }}:{{ src.stat.gid }} {{ mount_in_tmpfs_dest_path | dirname }}"
+{% else %}
+ExecStart=/bin/sh -c "mkdir -p {{ mount_in_tmpfs_dest_path | dirname }}; cp -r {{ mount_in_tmpfs_backup_path }} {{ mount_in_tmpfs_dest_path }}; chown -R {{ src.stat.uid }}:{{ src.stat.gid }} {{ mount_in_tmpfs_dest_path | dirname }}"
+{% endif %}
+
+[Install]
+WantedBy=multi-user.target

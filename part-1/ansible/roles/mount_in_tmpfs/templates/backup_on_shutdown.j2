@@ -1,0 +1,15 @@
+[Unit]
+Description=Backup {{ mount_in_tmpfs_dest_path }} on shutdown
+DefaultDependencies=no
+After=final.target
+
+[Service]
+Type=oneshot
+{% if mount_in_tmpfs_is_dir %}
+ExecStart=/bin/sh -c "mount -o remount,rw / && cp -r {{ mount_in_tmpfs_dest_path }}/. {{ mount_in_tmpfs_backup_path }}"
+{% else %}
+ExecStart=/bin/sh -c "mount -o remount,rw / && cp {{ mount_in_tmpfs_dest_path }} {{ mount_in_tmpfs_backup_path }}"
+{% endif %}
+
+[Install]
+WantedBy=final.target
